@@ -5,13 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tesla Dashboard Map</title>
   <style>
-    /* Fullscreen map container */
     #map {
       height: 100vh;
       width: 100vw;
-      filter: brightness(0.8); /* subtle dark mode */
+      filter: brightness(0.8);
     }
-    /* Bottom buttons container */
     #bottom-buttons {
       position: fixed;
       bottom: 0;
@@ -29,7 +27,6 @@
       font-size: 16px;
       cursor: pointer;
     }
-    /* Destination input container */
     #destination-input {
       position: fixed;
       top: 10px;
@@ -60,10 +57,64 @@
       cursor: pointer;
       font-size: 14px;
     }
+    #etaDisplay {
+      position: fixed;
+      bottom: 60px;
+      right: 20px;
+      background: #222;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      z-index: 1001;
+      font-size: 14px;
+      display: none;
+    }
+    #searchResults {
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1001;
+      max-height: 300px;
+      overflow-y: auto;
+      background: #1a1a1a;
+      color: white;
+      padding: 10px;
+      border-radius: 8px;
+      display: none;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 0 8px #000;
+      font-size: 14px;
+    }
+    .search-btn {
+      width: 100%;
+      background: #333;
+      color: white;
+      border: none;
+      text-align: left;
+      padding: 10px;
+      margin-bottom: 5px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #recenterBtn {
+      position: fixed;
+      top: 10px;
+      right: 20px;
+      z-index: 1001;
+      background: #333;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 0 5px #000;
+    }
   </style>
 </head>
 <body>
-  <!-- Map container -->
   <div id="map"></div>
 
   <!-- Destination input -->
@@ -71,6 +122,15 @@
     <input id="destination" type="text" placeholder="Enter destination" />
     <button id="goBtn">Go</button>
   </div>
+
+  <!-- Recenter button -->
+  <button id="recenterBtn">Recenter</button>
+
+  <!-- ETA Display -->
+  <div id="etaDisplay">ETA:</div>
+
+  <!-- Search results -->
+  <div id="searchResults"></div>
 
   <!-- Bottom buttons -->
   <div id="bottom-buttons">
@@ -83,36 +143,20 @@
     let map;
     let directionsService;
     let directionsRenderer;
+    let userMarker = null;
 
     function initMap() {
-      const defaultLocation = { lat: 29.7604, lng: -95.3698 }; // Houston fallback
+      const defaultLocation = { lat: 29.7604, lng: -95.3698 };
 
       map = new google.maps.Map(document.getElementById("map"), {
         zoom: 14,
         center: defaultLocation,
         styles: [
-          // Optional: Tesla-like dark mode map styles (simplified example)
-          {
-            elementType: "geometry",
-            stylers: [{ color: "#1e1e1e" }],
-          },
-          {
-            elementType: "labels.text.fill",
-            stylers: [{ color: "#ffffff" }],
-          },
-          {
-            elementType: "labels.text.stroke",
-            stylers: [{ color: "#000000" }],
-          },
-          {
-            featureType: "road",
-            elementType: "geometry",
-            stylers: [{ color: "#2c2c2c" }],
-          },
-          {
-            featureType: "water",
-            stylers: [{ color: "#0a0a0a" }],
-          },
+          { elementType: "geometry", stylers: [{ color: "#1e1e1e" }] },
+          { elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
+          { elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] },
+          { featureType: "road", elementType: "geometry", stylers: [{ color: "#2c2c2c" }] },
+          { featureType: "water", stylers: [{ color: "#0a0a0a" }] },
         ],
       });
 
@@ -121,45 +165,43 @@
         map: map,
         suppressMarkers: false,
         polylineOptions: {
-          strokeColor: "#00FF00", // green route line
+          strokeColor: "#00FF00",
           strokeWeight: 5,
         },
       });
 
-      // Try to get user's current location
       if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
+        navigator.geolocation.watchPosition(
           (position) => {
             const userPos = {
               lat: position.coords.latitude,
               lng: position.coords.longitude,
             };
             map.setCenter(userPos);
-            new google.maps.Marker({
-              position: userPos,
-              map: map,
-              title: "You are here",
-              icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#00FF00",
-                fillOpacity: 1,
-                strokeWeight: 2,
-                strokeColor: "#ffffff",
-              },
-            });
+            if (userMarker) {
+              userMarker.setPosition(userPos);
+            } else {
+              userMarker = new google.maps.Marker({
+                position: userPos,
+                map: map,
+                title: "You are here",
+                icon: {
+                  path: google.maps.SymbolPath.CIRCLE,
+                  scale: 8,
+                  fillColor: "#00FF00",
+                  fillOpacity: 1,
+                  strokeWeight: 2,
+                  strokeColor: "#ffffff",
+                },
+              });
+            }
           },
-          () => {
-            // If location fails, keep default center
-            console.warn("Geolocation permission denied or unavailable.");
-          }
+          (err) => console.warn("Live location error", err),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
-      } else {
-        console.warn("Geolocation not supported by this browser.");
       }
     }
 
-    // Calculate and display route on map
     function calculateAndDisplayRoute(origin, destination) {
       directionsService.route(
         {
@@ -170,42 +212,104 @@
         (response, status) => {
           if (status === "OK") {
             directionsRenderer.setDirections(response);
+            const leg = response.routes[0].legs[0];
+            const etaText = leg.duration.text;
+            showETA(etaText);
           } else {
-            alert("Directions request failed due to: " + status);
+            alert("Route failed: " + status);
           }
         }
       );
     }
 
-    // Button click event for routing
+    function showETA(eta) {
+      const etaDiv = document.getElementById("etaDisplay");
+      etaDiv.innerText = `ETA: ${eta}`;
+      etaDiv.style.display = "block";
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("goBtn").addEventListener("click", () => {
-        const destination = document.getElementById("destination").value.trim();
-        if (!destination) {
-          alert("Please enter a destination");
-          return;
-        }
-        if (!navigator.geolocation) {
-          alert("Geolocation not supported");
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const origin = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-            calculateAndDisplayRoute(origin, destination);
-          },
-          () => alert("Unable to get current location")
-        );
+        const input = document.getElementById("destination").value.trim();
+        if (!input) return alert("Enter a destination");
+
+        navigator.geolocation.getCurrentPosition((position) => {
+          const userLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+          const service = new google.maps.places.PlacesService(map);
+
+          service.textSearch(
+            {
+              query: input,
+              location: userLocation,
+              radius: 10000,
+            },
+            (results, status) => {
+              if (status !== google.maps.places.PlacesServiceStatus.OK || !results.length) {
+                alert("No results found");
+                return;
+              }
+
+              const topResults = results.slice(0, 5);
+              const destinations = topResults.map((place) => place.geometry.location);
+              const destAddresses = topResults.map((place) => place.name);
+
+              const matrixService = new google.maps.DistanceMatrixService();
+              matrixService.getDistanceMatrix(
+                {
+                  origins: [userLocation],
+                  destinations: destinations,
+                  travelMode: google.maps.TravelMode.DRIVING,
+                },
+                (response, status) => {
+                  if (status !== "OK") {
+                    alert("Distance matrix failed");
+                    return;
+                  }
+
+                  const resultsDiv = document.getElementById("searchResults");
+                  resultsDiv.innerHTML = "";
+                  resultsDiv.style.display = "block";
+
+                  response.rows[0].elements.forEach((element, index) => {
+                    const place = topResults[index];
+                    const distance = element.distance.text;
+                    const time = element.duration.text;
+
+                    const btn = document.createElement("button");
+                    btn.className = "search-btn";
+                    btn.textContent = `${destAddresses[index]} (${distance}, ${time})`;
+
+                    btn.onclick = () => {
+                      resultsDiv.style.display = "none";
+                      calculateAndDisplayRoute(userLocation, destinations[index]);
+                    };
+
+                    resultsDiv.appendChild(btn);
+                  });
+                }
+              );
+            }
+          );
+        });
+      });
+
+      document.getElementById("recenterBtn").addEventListener("click", () => {
+        if (!navigator.geolocation) return alert("Geolocation not supported");
+        navigator.geolocation.getCurrentPosition((position) => {
+          const userPos = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          map.panTo(userPos);
+          map.setZoom(17);
+        });
       });
     });
   </script>
 
-  <!-- Google Maps API script - replace YOUR_API_KEY below with your actual key -->
+  <!-- Google Maps API (your actual API key is used here) -->
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&callback=initMap"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places&callback=initMap"
     async
     defer
   ></script>
