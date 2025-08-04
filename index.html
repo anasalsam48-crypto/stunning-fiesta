@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tesla Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="dashboard">
+    <div class="left-panel">
+      <div class="speed">20</div>
+      <div class="car-visual">
+        <img src="car.png" alt="Car" />
+      </div>
+    </div>
+    <div class="right-panel">
+      <div id="map"></div>
+      <div class="media-player">
+        <div>Alpha Omega - Karnivool</div>
+        <div class="controls">
+          <button>⏮️</button>
+          <button>⏯️</button>
+          <button>⏭️</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&callback=initMap">
+  </script>
+</body>
+</html>
