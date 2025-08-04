@@ -2,33 +2,212 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Tesla Dashboard</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tesla Dashboard Map</title>
+  <style>
+    /* Fullscreen map container */
+    #map {
+      height: 100vh;
+      width: 100vw;
+      filter: brightness(0.8); /* subtle dark mode */
+    }
+    /* Bottom buttons container */
+    #bottom-buttons {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: #111;
+      display: flex;
+      justify-content: space-around;
+      padding: 12px 0;
+      z-index: 1000;
+    }
+    #bottom-buttons button {
+      color: white;
+      background: transparent;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    /* Destination input container */
+    #destination-input {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1001;
+      background: #222;
+      padding: 8px 12px;
+      border-radius: 5px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      box-shadow: 0 0 10px #000;
+    }
+    #destination-input input {
+      width: 250px;
+      padding: 6px;
+      border-radius: 3px;
+      border: none;
+      font-size: 14px;
+    }
+    #destination-input button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 3px;
+      background: #444;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+    }
+  </style>
 </head>
 <body>
-  <div class="dashboard">
-    <div class="left-panel">
-      <div class="speed">20</div>
-      <div class="car-visual">
-        <img src="car.png" alt="Car" />
-      </div>
-    </div>
-    <div class="right-panel">
-      <div id="map"></div>
-      <div class="media-player">
-        <div>Alpha Omega - Karnivool</div>
-        <div class="controls">
-          <button>⏮️</button>
-          <button>⏯️</button>
-          <button>⏭️</button>
-        </div>
-      </div>
-    </div>
+  <!-- Map container -->
+  <div id="map"></div>
+
+  <!-- Destination input -->
+  <div id="destination-input">
+    <input id="destination" type="text" placeholder="Enter destination" />
+    <button id="goBtn">Go</button>
   </div>
-  <script src="script.js"></script>
-  <script async defer
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&callback=initMap">
+
+  <!-- Bottom buttons -->
+  <div id="bottom-buttons">
+    <button id="btnHome">Home</button>
+    <button id="btnMusic">Music</button>
+    <button id="btnNav">Navigation</button>
+  </div>
+
+  <script>
+    let map;
+    let directionsService;
+    let directionsRenderer;
+
+    function initMap() {
+      const defaultLocation = { lat: 29.7604, lng: -95.3698 }; // Houston fallback
+
+      map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 14,
+        center: defaultLocation,
+        styles: [
+          // Optional: Tesla-like dark mode map styles (simplified example)
+          {
+            elementType: "geometry",
+            stylers: [{ color: "#1e1e1e" }],
+          },
+          {
+            elementType: "labels.text.fill",
+            stylers: [{ color: "#ffffff" }],
+          },
+          {
+            elementType: "labels.text.stroke",
+            stylers: [{ color: "#000000" }],
+          },
+          {
+            featureType: "road",
+            elementType: "geometry",
+            stylers: [{ color: "#2c2c2c" }],
+          },
+          {
+            featureType: "water",
+            stylers: [{ color: "#0a0a0a" }],
+          },
+        ],
+      });
+
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({
+        map: map,
+        suppressMarkers: false,
+        polylineOptions: {
+          strokeColor: "#00FF00", // green route line
+          strokeWeight: 5,
+        },
+      });
+
+      // Try to get user's current location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const userPos = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+            map.setCenter(userPos);
+            new google.maps.Marker({
+              position: userPos,
+              map: map,
+              title: "You are here",
+              icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 8,
+                fillColor: "#00FF00",
+                fillOpacity: 1,
+                strokeWeight: 2,
+                strokeColor: "#ffffff",
+              },
+            });
+          },
+          () => {
+            // If location fails, keep default center
+            console.warn("Geolocation permission denied or unavailable.");
+          }
+        );
+      } else {
+        console.warn("Geolocation not supported by this browser.");
+      }
+    }
+
+    // Calculate and display route on map
+    function calculateAndDisplayRoute(origin, destination) {
+      directionsService.route(
+        {
+          origin: origin,
+          destination: destination,
+          travelMode: google.maps.TravelMode.DRIVING,
+        },
+        (response, status) => {
+          if (status === "OK") {
+            directionsRenderer.setDirections(response);
+          } else {
+            alert("Directions request failed due to: " + status);
+          }
+        }
+      );
+    }
+
+    // Button click event for routing
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("goBtn").addEventListener("click", () => {
+        const destination = document.getElementById("destination").value.trim();
+        if (!destination) {
+          alert("Please enter a destination");
+          return;
+        }
+        if (!navigator.geolocation) {
+          alert("Geolocation not supported");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const origin = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+            calculateAndDisplayRoute(origin, destination);
+          },
+          () => alert("Unable to get current location")
+        );
+      });
+    });
   </script>
+
+  <!-- Google Maps API script - replace YOUR_API_KEY below with your actual key -->
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap"
+    async
+    defer
+  ></script>
 </body>
 </html>
