@@ -7,7 +7,7 @@
 
   <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; -webkit-user-select:none; -webkit-touch-callout:none; }
     #map { width: 100vw; height: 100vh; filter: brightness(0.85); }
 
     #destination-input {
@@ -39,6 +39,7 @@
       border-radius: 6px;
       color: white;
       box-shadow: 0 0 10px #000;
+      user-select:none;
     }
 
     .search-result {
@@ -73,6 +74,7 @@
       z-index: 1001;
       display: none;
       font-family: monospace;
+      user-select:none;
     }
 
     #bottom-buttons {
@@ -84,6 +86,7 @@
       justify-content: space-around;
       padding: 12px 0;
       z-index: 1001;
+      user-select:none;
     }
     #bottom-buttons button {
       color: white;
@@ -91,6 +94,7 @@
       border: none;
       font-size: 16px;
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
   </style>
 </head>
@@ -116,6 +120,7 @@
     let routeSourceId = "route-line";
     let routeInterval = null;
 
+    // Init MapTiler map
     map = new maplibregl.Map({
       container: 'map',
       style: 'https://api.maptiler.com/maps/dark-matter/style.json?key=FznQNgpoDlBPTioAaIs3',
@@ -123,6 +128,7 @@
       zoom: 13
     });
 
+    // Live user position tracking
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(pos => {
         userLocation = [pos.coords.latitude, pos.coords.longitude];
@@ -139,6 +145,7 @@
       alert("Geolocation not supported");
     }
 
+    // Decode Valhalla polyline to coordinates
     function decodePolyline(encoded) {
       const coords = [];
       let index = 0, lat = 0, lng = 0;
@@ -165,6 +172,7 @@
       return coords;
     }
 
+    // Draw route line on map
     function drawRoute(coords) {
       if (map.getSource(routeSourceId)) {
         map.removeLayer(routeSourceId);
@@ -192,6 +200,7 @@
       });
     }
 
+    // Show ETA in minutes
     function showETA(seconds) {
       const etaDisplay = document.getElementById("etaDisplay");
       const mins = Math.round(seconds / 60);
@@ -199,6 +208,7 @@
       etaDisplay.style.display = 'block';
     }
 
+    // Fetch route from Valhalla and draw
     function fetchRoute() {
       if (!userLocation || !destinationCoords) return;
 
@@ -214,7 +224,10 @@
       fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
         .then(res => res.json())
         .then(data => {
-          if (!data.trip || !data.trip.legs.length) return alert("Route error");
+          if (!data.trip || !data.trip.legs.length) {
+            alert("Routing error. Try another destination.");
+            return;
+          }
           const coords = decodePolyline(data.trip.legs[0].shape);
           drawRoute(coords);
           showETA(data.trip.summary.time);
@@ -222,14 +235,16 @@
         .catch(() => alert("Routing failed"));
     }
 
+    // Auto reroute every 10 seconds
     function startAutoRouting() {
       if (routeInterval) clearInterval(routeInterval);
-      routeInterval = setInterval(fetchRoute, 10000); // every 10 seconds
+      routeInterval = setInterval(fetchRoute, 10000);
     }
 
     const input = document.getElementById('destination');
     const resultsDiv = document.getElementById('searchResults');
 
+    // Distance calculator for sorting
     function getDistance(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -293,10 +308,15 @@
               resultsDiv.appendChild(div);
             });
             resultsDiv.style.display = 'block';
+          })
+          .catch(() => {
+            resultsDiv.style.display = 'none';
+            resultsDiv.innerHTML = '';
           });
       }, 300);
     });
 
+    // Hide results when clicking outside
     document.addEventListener('click', (e) => {
       if (!document.getElementById("destination-input").contains(e.target)) {
         resultsDiv.style.display = 'none';
