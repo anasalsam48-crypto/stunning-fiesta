@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tesla Dashboard with Live Search & Routing</title>
+  <title>Tesla Dashboard Dark Map</title>
 
   <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
@@ -61,9 +61,6 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    .search-result button:hover {
-      background: #00cc00;
-    }
 
     #etaDisplay {
       position: fixed;
@@ -115,30 +112,23 @@
 
   <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
   <script>
-    let map;
-    let userMarker;
-    let routeLayerAdded = false;
-    let userLocation = null;
+    let map, userMarker, userLocation = null, destinationCoords = null;
+    let routeSourceId = "route-line";
+    let routeInterval = null;
 
-    // Initialize map with free style (no API key needed)
     map = new maplibregl.Map({
       container: 'map',
-      style: 'https://demotiles.maplibre.org/style.json',
-      center: [-95.3698, 29.7604], // Houston default center
+      style: 'https://api.maptiler.com/maps/dark-matter/style.json?key=FznQNgpoDlBPTioAaIs3',
+      center: [-95.3698, 29.7604],
       zoom: 13
     });
 
-    // Track live user location and update marker + variable
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(pos => {
         userLocation = [pos.coords.latitude, pos.coords.longitude];
         const coords = [pos.coords.longitude, pos.coords.latitude];
-        map.setCenter(coords);
-
         if (!userMarker) {
-          userMarker = new maplibregl.Marker({ color: "#00FF00" })
-            .setLngLat(coords)
-            .addTo(map);
+          userMarker = new maplibregl.Marker({ color: "#00FF00" }).setLngLat(coords).addTo(map);
         } else {
           userMarker.setLngLat(coords);
         }
@@ -149,68 +139,114 @@
       alert("Geolocation not supported");
     }
 
-    // Decode flexible polyline (Valhalla encoding)
     function decodePolyline(encoded) {
-      const result = [];
-      let index = 0, len = encoded.length;
-      let lat = 0, lng = 0;
+      const coords = [];
+      let index = 0, lat = 0, lng = 0;
 
-      while (index < len) {
-        let shift = 0, b, delta = 0;
+      while (index < encoded.length) {
+        let result = 1, shift = 0, b;
         do {
-          b = encoded.charCodeAt(index++) - 63;
-          delta |= (b & 0x1f) << shift;
+          b = encoded.charCodeAt(index++) - 63 - 1;
+          result += b << shift;
           shift += 5;
-        } while (b >= 0x20);
-        const dlat = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
-        lat += dlat;
+        } while (b >= 0x1f);
+        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
 
-        shift = 0; delta = 0;
+        result = 1; shift = 0;
         do {
-          b = encoded.charCodeAt(index++) - 63;
-          delta |= (b & 0x1f) << shift;
+          b = encoded.charCodeAt(index++) - 63 - 1;
+          result += b << shift;
           shift += 5;
-        } while (b >= 0x20);
-        const dlng = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
-        lng += dlng;
+        } while (b >= 0x1f);
+        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
 
-        result.push([lng * 1e-5, lat * 1e-5]);
+        coords.push([lng * 1e-5, lat * 1e-5]);
       }
-      return result;
+      return coords;
+    }
+
+    function drawRoute(coords) {
+      if (map.getSource(routeSourceId)) {
+        map.removeLayer(routeSourceId);
+        map.removeSource(routeSourceId);
+      }
+      map.addSource(routeSourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: coords
+          }
+        }
+      });
+      map.addLayer({
+        id: routeSourceId,
+        type: 'line',
+        source: routeSourceId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#00FF00',
+          'line-width': 5
+        }
+      });
+    }
+
+    function showETA(seconds) {
+      const etaDisplay = document.getElementById("etaDisplay");
+      const mins = Math.round(seconds / 60);
+      etaDisplay.innerText = `ETA: ${mins} min`;
+      etaDisplay.style.display = 'block';
+    }
+
+    function fetchRoute() {
+      if (!userLocation || !destinationCoords) return;
+
+      const body = {
+        locations: [
+          { lat: userLocation[0], lon: userLocation[1] },
+          { lat: destinationCoords[0], lon: destinationCoords[1] }
+        ],
+        costing: "auto",
+        directions_options: { units: "miles" }
+      };
+
+      fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.trip || !data.trip.legs.length) return alert("Route error");
+          const coords = decodePolyline(data.trip.legs[0].shape);
+          drawRoute(coords);
+          showETA(data.trip.summary.time);
+        })
+        .catch(() => alert("Routing failed"));
+    }
+
+    function startAutoRouting() {
+      if (routeInterval) clearInterval(routeInterval);
+      routeInterval = setInterval(fetchRoute, 10000); // every 10 seconds
     }
 
     const input = document.getElementById('destination');
     const resultsDiv = document.getElementById('searchResults');
 
-    // Distance between two lat/lon points (Haversine)
     function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371; // km
+      const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
       const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a =
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // On input change, fetch search results live
     let searchTimeout = null;
     input.addEventListener('input', () => {
       const query = input.value.trim();
-      if (!query) {
-        resultsDiv.style.display = 'none';
-        resultsDiv.innerHTML = '';
-        return;
-      }
-      if (!userLocation) {
+      if (!query || !userLocation) {
         resultsDiv.style.display = 'none';
         resultsDiv.innerHTML = '';
         return;
       }
 
-      // Debounce requests by 300ms
       if (searchTimeout) clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => {
         fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lat=${userLocation[0]}&lon=${userLocation[1]}`)
@@ -221,12 +257,10 @@
               resultsDiv.innerHTML = '';
               return;
             }
-            // Sort by distance from user location
+
             const sorted = data.features.sort((a,b) => {
-              const aCoords = a.geometry.coordinates;
-              const bCoords = b.geometry.coordinates;
-              const distA = getDistance(userLocation[0], userLocation[1], aCoords[1], aCoords[0]);
-              const distB = getDistance(userLocation[0], userLocation[1], bCoords[1], bCoords[0]);
+              const distA = getDistance(userLocation[0], userLocation[1], a.geometry.coordinates[1], a.geometry.coordinates[0]);
+              const distB = getDistance(userLocation[0], userLocation[1], b.geometry.coordinates[1], b.geometry.coordinates[0]);
               return distA - distB;
             });
 
@@ -249,7 +283,9 @@
                 e.stopPropagation();
                 resultsDiv.style.display = 'none';
                 input.value = displayName;
-                routeTo([lat, lon]);
+                destinationCoords = [lat, lon];
+                fetchRoute();
+                startAutoRouting();
               };
 
               div.appendChild(span);
@@ -257,83 +293,15 @@
               resultsDiv.appendChild(div);
             });
             resultsDiv.style.display = 'block';
-          })
-          .catch(err => {
-            console.error('Search error:', err);
-            resultsDiv.style.display = 'none';
-            resultsDiv.innerHTML = '';
           });
       }, 300);
     });
 
-    // Route to selected destination
-    function routeTo(destLatLon) {
-      if (!userMarker) {
-        alert("Waiting for your location...");
-        return;
+    document.addEventListener('click', (e) => {
+      if (!document.getElementById("destination-input").contains(e.target)) {
+        resultsDiv.style.display = 'none';
       }
-
-      const originLngLat = userMarker.getLngLat();
-
-      const body = {
-        locations: [
-          { lat: originLngLat.lat, lon: originLngLat.lng },
-          { lat: destLatLon[0], lon: destLatLon[1] }
-        ],
-        costing: "auto",
-        directions_options: { units: "miles" }
-      };
-
-      fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
-        .then(res => res.json())
-        .then(data => {
-          if (!data.trip) {
-            alert("Routing error: no trip in response");
-            console.error("Routing response:", data);
-            return;
-          }
-          const durationMin = Math.round(data.trip.summary.time / 60);
-          const etaDiv = document.getElementById("etaDisplay");
-          etaDiv.style.display = "block";
-          etaDiv.innerText = `ETA: ${durationMin} min`;
-
-          const shape = data.trip.legs[0].shape;
-          const coords = decodePolyline(shape);
-
-          if (routeLayerAdded) {
-            if (map.getLayer('route')) map.removeLayer('route');
-            if (map.getSource('route')) map.removeSource('route');
-          }
-
-          map.addSource('route', {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: coords
-              }
-            }
-          });
-
-          map.addLayer({
-            id: 'route',
-            type: 'line',
-            source: 'route',
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': '#00FF00', 'line-width': 5 }
-          });
-
-          routeLayerAdded = true;
-
-          const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
-          map.fitBounds(bounds, { padding: 50 });
-        })
-        .catch(err => {
-          alert("Routing failed");
-          console.error("Routing error:", err);
-        });
-    }
+    });
   </script>
 </body>
 </html>
