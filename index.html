@@ -3,12 +3,53 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tesla Dashboard Map</title>
+  <title>Tesla Dashboard with Valhalla Routing</title>
+
+  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
-    #map {
-      height: 100vh;
-      width: 100vw;
-      filter: brightness(0.8);
+    html, body { margin: 0; padding: 0; height: 100%; }
+    #map { width: 100vw; height: 100vh; filter: brightness(0.85); }
+
+    #destination-input {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 999;
+      background: #222;
+      padding: 8px;
+      border-radius: 6px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      box-shadow: 0 0 10px #000;
+    }
+    #destination-input input {
+      width: 250px;
+      padding: 6px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    #destination-input button {
+      padding: 6px 10px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #etaDisplay {
+      position: fixed;
+      bottom: 60px;
+      right: 20px;
+      background: #222;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      z-index: 999;
+      display: none;
+      font-family: monospace;
     }
     #bottom-buttons {
       position: fixed;
@@ -18,7 +59,7 @@
       display: flex;
       justify-content: space-around;
       padding: 12px 0;
-      z-index: 1000;
+      z-index: 999;
     }
     #bottom-buttons button {
       color: white;
@@ -27,291 +68,167 @@
       font-size: 16px;
       cursor: pointer;
     }
-    #destination-input {
-      position: fixed;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1001;
-      background: #222;
-      padding: 8px 12px;
-      border-radius: 5px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      box-shadow: 0 0 10px #000;
-    }
-    #destination-input input {
-      width: 250px;
-      padding: 6px;
-      border-radius: 3px;
-      border: none;
-      font-size: 14px;
-    }
-    #destination-input button {
-      padding: 6px 12px;
-      border: none;
-      border-radius: 3px;
-      background: #444;
-      color: white;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    #etaDisplay {
-      position: fixed;
-      bottom: 60px;
-      right: 20px;
-      background: #222;
-      color: white;
-      padding: 8px 12px;
-      border-radius: 8px;
-      z-index: 1001;
-      font-size: 14px;
-      display: none;
-    }
-    #searchResults {
-      position: fixed;
-      top: 60px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1001;
-      max-height: 300px;
-      overflow-y: auto;
-      background: #1a1a1a;
-      color: white;
-      padding: 10px;
-      border-radius: 8px;
-      display: none;
-      width: 90%;
-      max-width: 400px;
-      box-shadow: 0 0 8px #000;
-      font-size: 14px;
-    }
-    .search-btn {
-      width: 100%;
-      background: #333;
-      color: white;
-      border: none;
-      text-align: left;
-      padding: 10px;
-      margin-bottom: 5px;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #recenterBtn {
-      position: fixed;
-      top: 10px;
-      right: 20px;
-      z-index: 1001;
-      background: #333;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
-      box-shadow: 0 0 5px #000;
-    }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- Destination input -->
   <div id="destination-input">
-    <input id="destination" type="text" placeholder="Enter destination" />
-    <button id="goBtn">Go</button>
+    <input type="text" id="destination" placeholder="Enter destination" />
+    <button onclick="findDestination()">Go</button>
   </div>
 
-  <!-- Recenter button -->
-  <button id="recenterBtn">Recenter</button>
-
-  <!-- ETA Display -->
   <div id="etaDisplay">ETA:</div>
 
-  <!-- Search results -->
-  <div id="searchResults"></div>
-
-  <!-- Bottom buttons -->
   <div id="bottom-buttons">
-    <button id="btnHome">Home</button>
-    <button id="btnMusic">Music</button>
-    <button id="btnNav">Navigation</button>
+    <button>Home</button>
+    <button>Music</button>
+    <button>Navigation</button>
   </div>
 
+  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
   <script>
     let map;
-    let directionsService;
-    let directionsRenderer;
-    let userMarker = null;
+    let userMarker;
+    let routeLine;
 
-    function initMap() {
-      const defaultLocation = { lat: 29.7604, lng: -95.3698 };
-
-      map = new google.maps.Map(document.getElementById("map"), {
-        zoom: 14,
-        center: defaultLocation,
-        styles: [
-          { elementType: "geometry", stylers: [{ color: "#1e1e1e" }] },
-          { elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
-          { elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] },
-          { featureType: "road", elementType: "geometry", stylers: [{ color: "#2c2c2c" }] },
-          { featureType: "water", stylers: [{ color: "#0a0a0a" }] },
-        ],
-      });
-
-      directionsService = new google.maps.DirectionsService();
-      directionsRenderer = new google.maps.DirectionsRenderer({
-        map: map,
-        suppressMarkers: false,
-        polylineOptions: {
-          strokeColor: "#00FF00",
-          strokeWeight: 5,
-        },
-      });
-
-      if (navigator.geolocation) {
-        navigator.geolocation.watchPosition(
-          (position) => {
-            const userPos = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-            map.setCenter(userPos);
-            if (userMarker) {
-              userMarker.setPosition(userPos);
-            } else {
-              userMarker = new google.maps.Marker({
-                position: userPos,
-                map: map,
-                title: "You are here",
-                icon: {
-                  path: google.maps.SymbolPath.CIRCLE,
-                  scale: 8,
-                  fillColor: "#00FF00",
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: "#ffffff",
-                },
-              });
-            }
-          },
-          (err) => console.warn("Live location error", err),
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-        );
-      }
-    }
-
-    function calculateAndDisplayRoute(origin, destination) {
-      directionsService.route(
-        {
-          origin: origin,
-          destination: destination,
-          travelMode: google.maps.TravelMode.DRIVING,
-        },
-        (response, status) => {
-          if (status === "OK") {
-            directionsRenderer.setDirections(response);
-            const leg = response.routes[0].legs[0];
-            const etaText = leg.duration.text;
-            showETA(etaText);
-          } else {
-            alert("Route failed: " + status);
-          }
-        }
-      );
-    }
-
-    function showETA(eta) {
-      const etaDiv = document.getElementById("etaDisplay");
-      etaDiv.innerText = `ETA: ${eta}`;
-      etaDiv.style.display = "block";
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("goBtn").addEventListener("click", () => {
-        const input = document.getElementById("destination").value.trim();
-        if (!input) return alert("Enter a destination");
-
-        navigator.geolocation.getCurrentPosition((position) => {
-          const userLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
-          const service = new google.maps.places.PlacesService(map);
-
-          service.textSearch(
-            {
-              query: input,
-              location: userLocation,
-              radius: 10000,
-            },
-            (results, status) => {
-              if (status !== google.maps.places.PlacesServiceStatus.OK || !results.length) {
-                alert("No results found");
-                return;
-              }
-
-              const topResults = results.slice(0, 5);
-              const destinations = topResults.map((place) => place.geometry.location);
-              const destAddresses = topResults.map((place) => place.name);
-
-              const matrixService = new google.maps.DistanceMatrixService();
-              matrixService.getDistanceMatrix(
-                {
-                  origins: [userLocation],
-                  destinations: destinations,
-                  travelMode: google.maps.TravelMode.DRIVING,
-                },
-                (response, status) => {
-                  if (status !== "OK") {
-                    alert("Distance matrix failed");
-                    return;
-                  }
-
-                  const resultsDiv = document.getElementById("searchResults");
-                  resultsDiv.innerHTML = "";
-                  resultsDiv.style.display = "block";
-
-                  response.rows[0].elements.forEach((element, index) => {
-                    const place = topResults[index];
-                    const distance = element.distance.text;
-                    const time = element.duration.text;
-
-                    const btn = document.createElement("button");
-                    btn.className = "search-btn";
-                    btn.textContent = `${destAddresses[index]} (${distance}, ${time})`;
-
-                    btn.onclick = () => {
-                      resultsDiv.style.display = "none";
-                      calculateAndDisplayRoute(userLocation, destinations[index]);
-                    };
-
-                    resultsDiv.appendChild(btn);
-                  });
-                }
-              );
-            }
-          );
-        });
-      });
-
-      document.getElementById("recenterBtn").addEventListener("click", () => {
-        if (!navigator.geolocation) return alert("Geolocation not supported");
-        navigator.geolocation.getCurrentPosition((position) => {
-          const userPos = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
-          map.panTo(userPos);
-          map.setZoom(17);
-        });
-      });
+    map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://api.maptiler.com/maps/streets-dark/style.json?key=Uqv6nV8Kjh3iKtp4AvsU', // MapTiler free dark style
+      center: [-95.3698, 29.7604],
+      zoom: 13
     });
-  </script>
 
-  <!-- Google Maps API (your actual API key is used here) -->
-  <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places&callback=initMap"
-    async
-    defer
-  ></script>
+    // Show live user location
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(pos => {
+        const coords = [pos.coords.longitude, pos.coords.latitude];
+        map.setCenter(coords);
+
+        if (!userMarker) {
+          userMarker = new maplibregl.Marker({ color: "#00FF00" }).setLngLat(coords).addTo(map);
+        } else {
+          userMarker.setLngLat(coords);
+        }
+      });
+    }
+
+    function findDestination() {
+      const query = document.getElementById("destination").value.trim();
+      if (!query) return alert("Enter a destination");
+
+      // Photon API geocode
+      fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.features.length) {
+            alert("Place not found");
+            return;
+          }
+          const [lon, lat] = data.features[0].geometry.coordinates;
+          getRouteToDestination([lat, lon]);
+        });
+    }
+
+    // Decode Valhalla polyline (encoded in flexible polyline format)
+    // Source: https://github.com/opening-hours/polyline  
+    // We'll include a simple decoder below
+
+    // Flexible Polyline Decoder (simplified)
+    // You can find official at: https://github.com/opening-hours/polyline
+    function decodePolyline(encoded) {
+      const decode = (str) => {
+        const result = [];
+        let index = 0, len = str.length;
+        let lat = 0, lng = 0;
+        while (index < len) {
+          let shift = 0, b, delta = 0;
+          do {
+            b = str.charCodeAt(index++) - 63;
+            delta |= (b & 0x1f) << shift;
+            shift += 5;
+          } while (b >= 0x20);
+          const dlat = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
+          lat += dlat;
+
+          shift = 0; delta = 0;
+          do {
+            b = str.charCodeAt(index++) - 63;
+            delta |= (b & 0x1f) << shift;
+            shift += 5;
+          } while (b >= 0x20);
+          const dlng = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
+          lng += dlng;
+
+          result.push([lng * 1e-5, lat * 1e-5]);
+        }
+        return result;
+      };
+      return decode(encoded);
+    }
+
+    function getRouteToDestination(destLatLon) {
+      if (!userMarker) {
+        alert("Waiting for your location...");
+        return;
+      }
+      const originLngLat = userMarker.getLngLat();
+
+      const body = {
+        locations: [
+          { lat: originLngLat.lat, lon: originLngLat.lng },
+          { lat: destLatLon[0], lon: destLatLon[1] }
+        ],
+        costing: "auto",
+        directions_options: { units: "miles" }
+      };
+
+      fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.trip) {
+            const durationMin = Math.round(data.trip.summary.time / 60);
+            document.getElementById("etaDisplay").style.display = "block";
+            document.getElementById("etaDisplay").innerText = `ETA: ${durationMin} min`;
+
+            // Decode the polyline shape from valhalla response
+            const shape = data.trip.legs[0].shape; // flexible polyline encoded string
+            const coords = decodePolyline(shape).map(c => [c[0], c[1]]); // [lng, lat]
+
+            // Remove previous route if any
+            if (map.getLayer('route')) {
+              map.removeLayer('route');
+              map.removeSource('route');
+            }
+
+            map.addSource('route', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: coords
+                }
+              }
+            });
+
+            map.addLayer({
+              id: 'route',
+              type: 'line',
+              source: 'route',
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: { 'line-color': '#00FF00', 'line-width': 5 }
+            });
+
+            // Fit map to route bounds
+            const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
+            map.fitBounds(bounds, { padding: 50 });
+          } else {
+            alert("Routing error");
+          }
+        })
+        .catch(() => alert("Routing failed"));
+    }
+  </script>
 </body>
 </html>
