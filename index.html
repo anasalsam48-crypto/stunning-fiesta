@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Tesla Dashboard v4</title>
+  <title>Tesla Dashboard v5</title>
   <style>
     /* Black background for full viewport and behind notch/status bar on iOS */
     html, body {
@@ -23,6 +23,7 @@
       padding-left: env(safe-area-inset-left);
       padding-right: env(safe-area-inset-right);
       padding-bottom: env(safe-area-inset-bottom);
+      overflow: hidden; /* prevent horizontal scroll */
     }
 
     #map {
@@ -32,15 +33,17 @@
     }
     #destination-input {
       position: absolute;
-      top: 10px;
+      top: calc(env(safe-area-inset-top) + 10px); /* move below status bar */
       left: 50%;
       transform: translateX(-50%);
       z-index: 10;
       background: #222;
       padding: 10px;
       border-radius: 6px;
-      width: 300px;
+      width: calc(100vw - 40px); /* prevent overflow on smaller screens */
+      max-width: 350px;
       box-shadow: 0 0 15px #000;
+      box-sizing: border-box;
     }
     #destination-input input {
       width: 100%;
@@ -161,6 +164,7 @@
     let directionsRenderer;
     let userLocation = null;
     let autoRecenter = false;
+    let currentHeading = 0;
 
     function initMap() {
       map = new google.maps.Map(document.getElementById("map"), {
@@ -214,18 +218,14 @@
               userMarker = new google.maps.Marker({
                 position: userLocation,
                 map,
-                icon: {
-                  path: google.maps.SymbolPath.CIRCLE,
-                  scale: 8,
-                  fillColor: "#0f0",
-                  fillOpacity: 1,
-                  strokeWeight: 0,
-                },
+                icon: getTeslaArrowIcon(0), // initial rotation 0
+                anchorPoint: new google.maps.Point(0, 0),
               });
               map.setCenter(userLocation);
               autoRecenter = true;
             } else {
               userMarker.setPosition(userLocation);
+              userMarker.setIcon(getTeslaArrowIcon(currentHeading));
               if (autoRecenter) {
                 map.setCenter(userLocation);
               }
@@ -233,10 +233,26 @@
           },
           (err) => {
             console.error("Geolocation error:", err);
-            // No alert to avoid annoying repeated alerts, just log error
           },
           { enableHighAccuracy: true, maximumAge: 5000, timeout: 7000 }
         );
+      }
+
+      // Optional: Update heading with device orientation (works on some devices/browsers)
+      if (window.DeviceOrientationEvent) {
+        window.addEventListener("deviceorientationabsolute", (event) => {
+          if (event.absolute && event.alpha !== null) {
+            currentHeading = event.alpha;
+            if (userMarker) {
+              userMarker.setIcon(getTeslaArrowIcon(currentHeading));
+            }
+            // If routing and autoRecenter, rotate the map with the heading:
+            if (!autoRecenter) {
+              map.setHeading(currentHeading);
+              map.setCenter(userLocation);
+            }
+          }
+        });
       }
 
       const input = document.getElementById("destination");
@@ -284,6 +300,7 @@
       document.getElementById("recenterBtn").addEventListener("click", () => {
         if (userLocation) {
           map.setCenter(userLocation);
+          map.setHeading(0);
           autoRecenter = true;
         }
       });
@@ -293,7 +310,27 @@
         etaDisplay.style.display = "none";
         stopBtn.style.display = "none";
         autoRecenter = true;
+        map.setHeading(0);
       });
+    }
+
+    function getTeslaArrowIcon(rotationDegrees) {
+      // SVG arrow path for Tesla style, rounded edges, no tail
+      const svg = `
+        <svg width="40" height="40" viewBox="0 0 24 24" 
+          xmlns="http://www.w3.org/2000/svg" 
+          fill="red" stroke="white" stroke-width="1.5" 
+          style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8)); border-radius:6px;">
+          <path d="M12 2 L16 18 L12 15 L8 18 Z" fill="red" stroke="white" stroke-linejoin="round" />
+        </svg>
+      `;
+
+      return {
+        url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+        anchor: new google.maps.Point(12, 12), // center anchor
+        scaledSize: new google.maps.Size(24, 24),
+        rotation: rotationDegrees,
+      };
     }
 
     function routeTo(destination) {
