@@ -5,28 +5,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tesla Dashboard</title>
   <style>
-    html, body, #map {
-      margin: 0; padding: 0; height: 100%;
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
       font-family: sans-serif;
-      background: #121212;
-      color: white;
+      background-color: black;
+      overflow: hidden;
     }
+
+    body::before {
+      content: "";
+      position: fixed;
+      top: -1000px;
+      left: -1000px;
+      width: 5000px;
+      height: 5000px;
+      background: black;
+      z-index: -1;
+    }
+
     #map {
-      width: 100vw;
-      height: 100vh;
+      height: 100%;
+      width: 100%;
     }
+
     #destination-input {
       position: fixed;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 1002;
+      z-index: 1001;
       background: #222;
-      padding: 8px 12px;
+      padding: 8px;
       border-radius: 6px;
       width: 320px;
       box-shadow: 0 0 10px #000;
     }
+
     #destination-input input {
       width: 100%;
       padding: 6px;
@@ -34,18 +51,21 @@
       border-radius: 4px;
       font-size: 14px;
       box-sizing: border-box;
-      color: black;
-    }
-    #searchResults {
       background: #111;
+      color: white;
+    }
+
+    #searchResults {
       max-height: 250px;
       overflow-y: auto;
+      background: #111;
       margin-top: 4px;
       border-radius: 6px;
       color: white;
       box-shadow: 0 0 10px #000;
       display: none;
     }
+
     .search-result {
       display: flex;
       justify-content: space-between;
@@ -54,9 +74,11 @@
       border-bottom: 1px solid #333;
       cursor: pointer;
     }
+
     .search-result:hover {
       background: #333;
     }
+
     .search-result button {
       background: #00FF00;
       border: none;
@@ -66,22 +88,26 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    .search-result button:hover {
-      background: #00cc00;
-    }
-    #etaDisplay {
+
+    #etaDisplay, #stopButton {
       position: fixed;
-      bottom: 60px;
+      bottom: 80px;
       right: 20px;
       background: #222;
+      color: white;
       padding: 8px 12px;
       border-radius: 6px;
+      z-index: 1001;
       font-family: monospace;
       display: none;
-      z-index: 1001;
-      color: #00ff00;
-      font-weight: bold;
     }
+
+    #stopButton {
+      bottom: 140px;
+      cursor: pointer;
+      background: #ff4444;
+    }
+
     #bottom-buttons {
       position: fixed;
       bottom: 0;
@@ -92,25 +118,13 @@
       padding: 12px 0;
       z-index: 1001;
     }
+
     #bottom-buttons button {
+      color: white;
       background: transparent;
       border: none;
-      color: white;
       font-size: 16px;
       cursor: pointer;
-    }
-    #recenterBtn {
-      position: fixed;
-      bottom: 120px;
-      right: 20px;
-      z-index: 1001;
-      background: #444;
-      color: white;
-      padding: 8px 12px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
     }
   </style>
 </head>
@@ -118,184 +132,147 @@
   <div id="map"></div>
 
   <div id="destination-input">
-    <input id="destination" type="text" placeholder="Search destination..." autocomplete="off" />
+    <input type="text" id="destination" placeholder="Search destination..." autocomplete="off" />
     <div id="searchResults"></div>
   </div>
 
   <div id="etaDisplay">ETA:</div>
-  <button id="recenterBtn">Recenter</button>
+  <div id="stopButton">Stop</div>
 
   <div id="bottom-buttons">
-    <button>Home</button>
+    <button onclick="recenterMap()">Recenter</button>
     <button>Music</button>
     <button>Navigation</button>
   </div>
 
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places"></script>
   <script>
-    let map, directionsService, directionsRenderer, userMarker;
-    let userLocation = null;
-    let resultsDiv;
-    let service;
+    let map, directionsRenderer, directionsService, userMarker, userPosition, watchId;
+    let routing = false;
 
     function initMap() {
       directionsService = new google.maps.DirectionsService();
-      directionsRenderer = new google.maps.DirectionsRenderer({
-        suppressMarkers: false,
-        polylineOptions: {
-          strokeColor: '#00FF00',
-          strokeWeight: 5,
-        },
-      });
+      directionsRenderer = new google.maps.DirectionsRenderer({ suppressMarkers: true });
 
-      map = new google.maps.Map(document.getElementById('map'), {
-        zoom: 14,
-        styles: [
-          { elementType: 'geometry', stylers: [{ color: '#1e1e1e' }] },
-          { elementType: 'labels.text.fill', stylers: [{ color: '#ffffff' }] },
-          { elementType: 'labels.text.stroke', stylers: [{ color: '#000000' }] },
-          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2c2c2c' }] },
-          { featureType: 'water', stylers: [{ color: '#0a0a0a' }] }
-        ],
+      map = new google.maps.Map(document.getElementById("map"), {
+        zoom: 15,
+        center: { lat: 0, lng: 0 },
         disableDefaultUI: true,
+        styles: [ { elementType: "geometry", stylers: [ { color: "#000000" } ] }, { elementType: "labels.text.fill", stylers: [ { color: "#ffffff" } ] }, { elementType: "labels.text.stroke", stylers: [ { color: "#000000" } ] }, { featureType: "road", stylers: [ { color: "#444444" } ] } ]
       });
 
       directionsRenderer.setMap(map);
-      resultsDiv = document.getElementById('searchResults');
-      service = new google.maps.places.PlacesService(map);
 
       if (navigator.geolocation) {
-        navigator.geolocation.watchPosition(
-          (pos) => {
-            userLocation = new google.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
-            map.setCenter(userLocation);
-            if (userMarker) {
-              userMarker.setPosition(userLocation);
-            } else {
-              userMarker = new google.maps.Marker({
-                position: userLocation,
-                map,
-                title: 'You are here',
-                icon: {
-                  path: google.maps.SymbolPath.CIRCLE,
-                  scale: 8,
-                  fillColor: '#00FF00',
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: '#ffffff',
-                },
-              });
+        watchId = navigator.geolocation.watchPosition(pos => {
+          userPosition = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          if (!userMarker) {
+            userMarker = new google.maps.Marker({
+              position: userPosition,
+              map: map,
+              icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#00FF00", fillOpacity: 1, strokeWeight: 2 }
+            });
+            map.setCenter(userPosition);
+          } else {
+            userMarker.setPosition(userPosition);
+            if (!routing) {
+              map.setCenter(userPosition);
             }
-          },
-          (err) => alert("Geolocation error: " + err.message),
-          { enableHighAccuracy: true }
-        );
+          }
+        });
       } else {
-        alert('Geolocation not supported.');
+        alert("Geolocation not supported");
       }
 
-      setupSearch();
-    }
+      const input = document.getElementById("destination");
+      const searchBox = new google.maps.places.SearchBox(input);
+      const resultsDiv = document.getElementById("searchResults");
 
-    function setupSearch() {
-      const input = document.getElementById('destination');
+      input.addEventListener("input", () => {
+        resultsDiv.innerHTML = "";
+        resultsDiv.style.display = "none";
+      });
 
-      input.addEventListener('input', () => {
-        const query = input.value.trim();
-        if (!query || !userLocation) {
-          resultsDiv.innerHTML = '';
-          resultsDiv.style.display = 'none';
-          return;
-        }
+      searchBox.addListener("places_changed", () => {
+        const places = searchBox.getPlaces();
+        if (!places || places.length === 0) return;
 
-        service.textSearch({
-          query: query,
-          location: userLocation,
-          radius: 10000,
-        }, (results, status) => {
-          if (status !== google.maps.places.PlacesServiceStatus.OK || !results.length) {
-            resultsDiv.innerHTML = '<div style="padding:8px">No results</div>';
-            resultsDiv.style.display = 'block';
-            return;
-          }
+        resultsDiv.innerHTML = "";
+        places.forEach(place => {
+          if (!place.geometry) return;
+          const resultDiv = document.createElement("div");
+          resultDiv.className = "search-result";
 
-          results.sort((a, b) => {
-            const distA = google.maps.geometry.spherical.computeDistanceBetween(userLocation, a.geometry.location);
-            const distB = google.maps.geometry.spherical.computeDistanceBetween(userLocation, b.geometry.location);
-            return distA - distB;
-          });
+          const span = document.createElement("span");
+          span.textContent = place.name;
 
-          resultsDiv.innerHTML = '';
-          results.forEach(place => {
-            const div = document.createElement('div');
-            div.className = 'search-result';
+          const btn = document.createElement("button");
+          btn.textContent = "Go";
+          btn.onclick = () => {
+            document.getElementById("searchResults").style.display = "none";
+            input.value = place.name;
+            routeTo(place.geometry.location);
+          };
 
-            const span = document.createElement('span');
-            span.textContent = `${place.name} - ${place.formatted_address}`;
-
-            const btn = document.createElement('button');
-            btn.textContent = 'Go';
-            btn.onclick = () => {
-              routeTo(place.geometry.location);
-              input.value = `${place.name} - ${place.formatted_address}`;
-              resultsDiv.innerHTML = '';
-              resultsDiv.style.display = 'none';
-            };
-
-            div.appendChild(span);
-            div.appendChild(btn);
-            resultsDiv.appendChild(div);
-          });
-          resultsDiv.style.display = 'block';
+          resultDiv.appendChild(span);
+          resultDiv.appendChild(btn);
+          resultsDiv.appendChild(resultDiv);
         });
+
+        resultsDiv.style.display = "block";
       });
 
-      // Pressing Enter triggers first result
-      input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-          const firstBtn = resultsDiv.querySelector('button');
-          if (firstBtn) firstBtn.click();
+      document.addEventListener("click", (e) => {
+        if (!document.getElementById("destination-input").contains(e.target)) {
+          resultsDiv.style.display = "none";
         }
       });
 
-      // Clicking outside closes results
-      document.addEventListener('click', (e) => {
-        if (!document.getElementById('destination-input').contains(e.target)) {
-          resultsDiv.style.display = 'none';
-        }
-      });
-
-      // Recenter button
-      document.getElementById('recenterBtn').addEventListener('click', () => {
-        if (userLocation) map.setCenter(userLocation);
-      });
+      document.getElementById("stopButton").onclick = stopRouting;
     }
 
     function routeTo(destination) {
-      if (!userLocation) {
-        alert('Waiting for your location...');
+      if (!userPosition) {
+        alert("Waiting for location...");
         return;
       }
-      directionsService.route(
-        {
-          origin: userLocation,
-          destination: destination,
-          travelMode: google.maps.TravelMode.DRIVING,
-        },
-        (response, status) => {
-          if (status === 'OK') {
-            directionsRenderer.setDirections(response);
-            const leg = response.routes[0].legs[0];
-            const etaDiv = document.getElementById('etaDisplay');
-            etaDiv.innerText = `ETA: ${leg.duration.text}`;
-            etaDiv.style.display = 'block';
-          } else {
-            alert('Directions request failed: ' + status);
-          }
-        }
-      );
-    }
-  </script>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places,geometry&callback=initMap" async defer></script>
+      routing = true;
+      document.getElementById("stopButton").style.display = "block";
+
+      directionsService.route({
+        origin: userPosition,
+        destination: destination,
+        travelMode: "DRIVING"
+      }, (result, status) => {
+        if (status === "OK") {
+          directionsRenderer.setDirections(result);
+          const duration = result.routes[0].legs[0].duration.text;
+          document.getElementById("etaDisplay").innerText = "ETA: " + duration;
+          document.getElementById("etaDisplay").style.display = "block";
+        } else {
+          alert("Routing failed: " + status);
+        }
+      });
+    }
+
+    function stopRouting() {
+      directionsRenderer.set("directions", null);
+      document.getElementById("etaDisplay").style.display = "none";
+      document.getElementById("stopButton").style.display = "none";
+      routing = false;
+      if (userPosition) {
+        map.setCenter(userPosition);
+      }
+    }
+
+    function recenterMap() {
+      if (userPosition) {
+        map.setCenter(userPosition);
+      }
+    }
+
+    window.onload = initMap;
+  </script>
 </body>
 </html>
