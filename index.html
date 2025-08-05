@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tesla Dashboard with Valhalla Routing</title>
+  <title>Tesla Dashboard with Live Search & Routing</title>
 
   <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
     #map { width: 100vw; height: 100vh; filter: brightness(0.85); }
 
     #destination-input {
@@ -15,30 +15,56 @@
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 999;
+      z-index: 1001;
       background: #222;
       padding: 8px;
       border-radius: 6px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
+      width: 320px;
       box-shadow: 0 0 10px #000;
     }
     #destination-input input {
-      width: 250px;
+      width: 100%;
       padding: 6px;
       border: none;
       border-radius: 4px;
       font-size: 14px;
+      box-sizing: border-box;
     }
-    #destination-input button {
-      padding: 6px 10px;
-      background: #444;
+
+    #searchResults {
+      max-height: 250px;
+      overflow-y: auto;
+      background: #111;
+      margin-top: 4px;
+      border-radius: 6px;
       color: white;
+      box-shadow: 0 0 10px #000;
+    }
+
+    .search-result {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid #333;
+      cursor: pointer;
+    }
+    .search-result:hover {
+      background: #333;
+    }
+    .search-result button {
+      background: #00FF00;
       border: none;
+      color: #000;
+      font-weight: bold;
+      padding: 4px 8px;
       border-radius: 4px;
       cursor: pointer;
     }
+    .search-result button:hover {
+      background: #00cc00;
+    }
+
     #etaDisplay {
       position: fixed;
       bottom: 60px;
@@ -47,10 +73,11 @@
       color: white;
       padding: 8px 12px;
       border-radius: 6px;
-      z-index: 999;
+      z-index: 1001;
       display: none;
       font-family: monospace;
     }
+
     #bottom-buttons {
       position: fixed;
       bottom: 0;
@@ -59,7 +86,7 @@
       display: flex;
       justify-content: space-around;
       padding: 12px 0;
-      z-index: 999;
+      z-index: 1001;
     }
     #bottom-buttons button {
       color: white;
@@ -74,8 +101,8 @@
   <div id="map"></div>
 
   <div id="destination-input">
-    <input type="text" id="destination" placeholder="Enter destination" />
-    <button onclick="findDestination()">Go</button>
+    <input type="text" id="destination" placeholder="Search destination..." autocomplete="off" />
+    <div id="searchResults" style="display:none;"></div>
   </div>
 
   <div id="etaDisplay">ETA:</div>
@@ -90,88 +117,162 @@
   <script>
     let map;
     let userMarker;
-    let routeLine;
+    let routeLayerAdded = false;
+    let userLocation = null;
 
+    // Initialize map with free style (no API key needed)
     map = new maplibregl.Map({
       container: 'map',
-      style: 'https://api.maptiler.com/maps/streets-dark/style.json?key=Uqv6nV8Kjh3iKtp4AvsU', // MapTiler free dark style
-      center: [-95.3698, 29.7604],
+      style: 'https://demotiles.maplibre.org/style.json',
+      center: [-95.3698, 29.7604], // Houston default center
       zoom: 13
     });
 
-    // Show live user location
+    // Track live user location and update marker + variable
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition(pos => {
+        userLocation = [pos.coords.latitude, pos.coords.longitude];
         const coords = [pos.coords.longitude, pos.coords.latitude];
         map.setCenter(coords);
 
         if (!userMarker) {
-          userMarker = new maplibregl.Marker({ color: "#00FF00" }).setLngLat(coords).addTo(map);
+          userMarker = new maplibregl.Marker({ color: "#00FF00" })
+            .setLngLat(coords)
+            .addTo(map);
         } else {
           userMarker.setLngLat(coords);
         }
-      });
+      }, err => {
+        console.warn('Geolocation error:', err);
+      }, { enableHighAccuracy: true });
+    } else {
+      alert("Geolocation not supported");
     }
 
-    function findDestination() {
-      const query = document.getElementById("destination").value.trim();
-      if (!query) return alert("Enter a destination");
-
-      // Photon API geocode
-      fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=1`)
-        .then(res => res.json())
-        .then(data => {
-          if (!data.features.length) {
-            alert("Place not found");
-            return;
-          }
-          const [lon, lat] = data.features[0].geometry.coordinates;
-          getRouteToDestination([lat, lon]);
-        });
-    }
-
-    // Decode Valhalla polyline (encoded in flexible polyline format)
-    // Source: https://github.com/opening-hours/polyline  
-    // We'll include a simple decoder below
-
-    // Flexible Polyline Decoder (simplified)
-    // You can find official at: https://github.com/opening-hours/polyline
+    // Decode flexible polyline (Valhalla encoding)
     function decodePolyline(encoded) {
-      const decode = (str) => {
-        const result = [];
-        let index = 0, len = str.length;
-        let lat = 0, lng = 0;
-        while (index < len) {
-          let shift = 0, b, delta = 0;
-          do {
-            b = str.charCodeAt(index++) - 63;
-            delta |= (b & 0x1f) << shift;
-            shift += 5;
-          } while (b >= 0x20);
-          const dlat = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
-          lat += dlat;
+      const result = [];
+      let index = 0, len = encoded.length;
+      let lat = 0, lng = 0;
 
-          shift = 0; delta = 0;
-          do {
-            b = str.charCodeAt(index++) - 63;
-            delta |= (b & 0x1f) << shift;
-            shift += 5;
-          } while (b >= 0x20);
-          const dlng = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
-          lng += dlng;
+      while (index < len) {
+        let shift = 0, b, delta = 0;
+        do {
+          b = encoded.charCodeAt(index++) - 63;
+          delta |= (b & 0x1f) << shift;
+          shift += 5;
+        } while (b >= 0x20);
+        const dlat = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
+        lat += dlat;
 
-          result.push([lng * 1e-5, lat * 1e-5]);
-        }
-        return result;
-      };
-      return decode(encoded);
+        shift = 0; delta = 0;
+        do {
+          b = encoded.charCodeAt(index++) - 63;
+          delta |= (b & 0x1f) << shift;
+          shift += 5;
+        } while (b >= 0x20);
+        const dlng = (delta & 1) ? ~(delta >> 1) : (delta >> 1);
+        lng += dlng;
+
+        result.push([lng * 1e-5, lat * 1e-5]);
+      }
+      return result;
     }
 
-    function getRouteToDestination(destLatLon) {
+    const input = document.getElementById('destination');
+    const resultsDiv = document.getElementById('searchResults');
+
+    // Distance between two lat/lon points (Haversine)
+    function getDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; // km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    // On input change, fetch search results live
+    let searchTimeout = null;
+    input.addEventListener('input', () => {
+      const query = input.value.trim();
+      if (!query) {
+        resultsDiv.style.display = 'none';
+        resultsDiv.innerHTML = '';
+        return;
+      }
+      if (!userLocation) {
+        resultsDiv.style.display = 'none';
+        resultsDiv.innerHTML = '';
+        return;
+      }
+
+      // Debounce requests by 300ms
+      if (searchTimeout) clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lat=${userLocation[0]}&lon=${userLocation[1]}`)
+          .then(res => res.json())
+          .then(data => {
+            if (!data.features || data.features.length === 0) {
+              resultsDiv.style.display = 'none';
+              resultsDiv.innerHTML = '';
+              return;
+            }
+            // Sort by distance from user location
+            const sorted = data.features.sort((a,b) => {
+              const aCoords = a.geometry.coordinates;
+              const bCoords = b.geometry.coordinates;
+              const distA = getDistance(userLocation[0], userLocation[1], aCoords[1], aCoords[0]);
+              const distB = getDistance(userLocation[0], userLocation[1], bCoords[1], bCoords[0]);
+              return distA - distB;
+            });
+
+            resultsDiv.innerHTML = '';
+            sorted.forEach(feature => {
+              const name = feature.properties.name || feature.properties.street || "Unknown";
+              const city = feature.properties.city || feature.properties.state || "";
+              const displayName = city ? `${name}, ${city}` : name;
+              const [lon, lat] = feature.geometry.coordinates;
+
+              const div = document.createElement('div');
+              div.className = 'search-result';
+
+              const span = document.createElement('span');
+              span.textContent = displayName;
+
+              const btn = document.createElement('button');
+              btn.textContent = 'Go';
+              btn.onclick = (e) => {
+                e.stopPropagation();
+                resultsDiv.style.display = 'none';
+                input.value = displayName;
+                routeTo([lat, lon]);
+              };
+
+              div.appendChild(span);
+              div.appendChild(btn);
+              resultsDiv.appendChild(div);
+            });
+            resultsDiv.style.display = 'block';
+          })
+          .catch(err => {
+            console.error('Search error:', err);
+            resultsDiv.style.display = 'none';
+            resultsDiv.innerHTML = '';
+          });
+      }, 300);
+    });
+
+    // Route to selected destination
+    function routeTo(destLatLon) {
       if (!userMarker) {
         alert("Waiting for your location...");
         return;
       }
+
       const originLngLat = userMarker.getLngLat();
 
       const body = {
@@ -186,48 +287,52 @@
       fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
         .then(res => res.json())
         .then(data => {
-          if (data.trip) {
-            const durationMin = Math.round(data.trip.summary.time / 60);
-            document.getElementById("etaDisplay").style.display = "block";
-            document.getElementById("etaDisplay").innerText = `ETA: ${durationMin} min`;
-
-            // Decode the polyline shape from valhalla response
-            const shape = data.trip.legs[0].shape; // flexible polyline encoded string
-            const coords = decodePolyline(shape).map(c => [c[0], c[1]]); // [lng, lat]
-
-            // Remove previous route if any
-            if (map.getLayer('route')) {
-              map.removeLayer('route');
-              map.removeSource('route');
-            }
-
-            map.addSource('route', {
-              type: 'geojson',
-              data: {
-                type: 'Feature',
-                geometry: {
-                  type: 'LineString',
-                  coordinates: coords
-                }
-              }
-            });
-
-            map.addLayer({
-              id: 'route',
-              type: 'line',
-              source: 'route',
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: { 'line-color': '#00FF00', 'line-width': 5 }
-            });
-
-            // Fit map to route bounds
-            const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
-            map.fitBounds(bounds, { padding: 50 });
-          } else {
-            alert("Routing error");
+          if (!data.trip) {
+            alert("Routing error: no trip in response");
+            console.error("Routing response:", data);
+            return;
           }
+          const durationMin = Math.round(data.trip.summary.time / 60);
+          const etaDiv = document.getElementById("etaDisplay");
+          etaDiv.style.display = "block";
+          etaDiv.innerText = `ETA: ${durationMin} min`;
+
+          const shape = data.trip.legs[0].shape;
+          const coords = decodePolyline(shape);
+
+          if (routeLayerAdded) {
+            if (map.getLayer('route')) map.removeLayer('route');
+            if (map.getSource('route')) map.removeSource('route');
+          }
+
+          map.addSource('route', {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: coords
+              }
+            }
+          });
+
+          map.addLayer({
+            id: 'route',
+            type: 'line',
+            source: 'route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#00FF00', 'line-width': 5 }
+          });
+
+          routeLayerAdded = true;
+
+          const bounds = coords.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coords[0], coords[0]));
+          map.fitBounds(bounds, { padding: 50 });
         })
-        .catch(() => alert("Routing failed"));
+        .catch(err => {
+          alert("Routing failed");
+          console.error("Routing error:", err);
+        });
     }
   </script>
 </body>
