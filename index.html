@@ -3,21 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tesla Dashboard Dark Map</title>
-
-  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <title>Tesla Dashboard with Google Maps Live Search</title>
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; font-family: sans-serif; -webkit-user-select:none; -webkit-touch-callout:none; }
-    #map { width: 100vw; height: 100vh; filter: brightness(0.85); }
-
+    html, body, #map {
+      margin: 0; padding: 0; height: 100%;
+      font-family: sans-serif;
+      background: #121212;
+      color: white;
+    }
+    #map {
+      filter: brightness(0.8);
+      width: 100vw;
+      height: 100vh;
+    }
     #destination-input {
       position: fixed;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 1001;
+      z-index: 1002;
       background: #222;
-      padding: 8px;
+      padding: 8px 12px;
       border-radius: 6px;
       width: 320px;
       box-shadow: 0 0 10px #000;
@@ -29,19 +35,17 @@
       border-radius: 4px;
       font-size: 14px;
       box-sizing: border-box;
+      color: black;
     }
-
     #searchResults {
+      background: #111;
       max-height: 250px;
       overflow-y: auto;
-      background: #111;
       margin-top: 4px;
       border-radius: 6px;
       color: white;
       box-shadow: 0 0 10px #000;
-      user-select:none;
     }
-
     .search-result {
       display: flex;
       justify-content: space-between;
@@ -62,21 +66,22 @@
       border-radius: 4px;
       cursor: pointer;
     }
-
+    .search-result button:hover {
+      background: #00cc00;
+    }
     #etaDisplay {
       position: fixed;
       bottom: 60px;
       right: 20px;
       background: #222;
-      color: white;
       padding: 8px 12px;
       border-radius: 6px;
-      z-index: 1001;
-      display: none;
       font-family: monospace;
-      user-select:none;
+      display: none;
+      z-index: 1001;
+      color: #00ff00;
+      font-weight: bold;
     }
-
     #bottom-buttons {
       position: fixed;
       bottom: 0;
@@ -86,15 +91,13 @@
       justify-content: space-around;
       padding: 12px 0;
       z-index: 1001;
-      user-select:none;
     }
     #bottom-buttons button {
-      color: white;
       background: transparent;
       border: none;
+      color: white;
       font-size: 16px;
       cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
     }
   </style>
 </head>
@@ -102,7 +105,7 @@
   <div id="map"></div>
 
   <div id="destination-input">
-    <input type="text" id="destination" placeholder="Search destination..." autocomplete="off" />
+    <input id="destination" type="text" placeholder="Search destination..." autocomplete="off" />
     <div id="searchResults" style="display:none;"></div>
   </div>
 
@@ -114,193 +117,124 @@
     <button>Navigation</button>
   </div>
 
-  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
   <script>
-    let map, userMarker, userLocation = null, destinationCoords = null;
-    let routeSourceId = "route-line";
-    let routeInterval = null;
+    let map, directionsService, directionsRenderer, userMarker;
+    let userLocation = null;
 
-    // Init MapTiler map
-    map = new maplibregl.Map({
-      container: 'map',
-      style: 'https://api.maptiler.com/maps/dark-matter/style.json?key=FznQNgpoDlBPTioAaIs3',
-      center: [-95.3698, 29.7604],
-      zoom: 13
-    });
+    function initMap() {
+      const defaultLocation = { lat: 29.7604, lng: -95.3698 };
 
-    // Live user position tracking
-    if (navigator.geolocation) {
-      navigator.geolocation.watchPosition(pos => {
-        userLocation = [pos.coords.latitude, pos.coords.longitude];
-        const coords = [pos.coords.longitude, pos.coords.latitude];
-        if (!userMarker) {
-          userMarker = new maplibregl.Marker({ color: "#00FF00" }).setLngLat(coords).addTo(map);
-        } else {
-          userMarker.setLngLat(coords);
-        }
-      }, err => {
-        console.warn('Geolocation error:', err);
-      }, { enableHighAccuracy: true });
-    } else {
-      alert("Geolocation not supported");
-    }
-
-    // Decode Valhalla polyline to coordinates
-    function decodePolyline(encoded) {
-      const coords = [];
-      let index = 0, lat = 0, lng = 0;
-
-      while (index < encoded.length) {
-        let result = 1, shift = 0, b;
-        do {
-          b = encoded.charCodeAt(index++) - 63 - 1;
-          result += b << shift;
-          shift += 5;
-        } while (b >= 0x1f);
-        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-
-        result = 1; shift = 0;
-        do {
-          b = encoded.charCodeAt(index++) - 63 - 1;
-          result += b << shift;
-          shift += 5;
-        } while (b >= 0x1f);
-        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
-
-        coords.push([lng * 1e-5, lat * 1e-5]);
-      }
-      return coords;
-    }
-
-    // Draw route line on map
-    function drawRoute(coords) {
-      if (map.getSource(routeSourceId)) {
-        map.removeLayer(routeSourceId);
-        map.removeSource(routeSourceId);
-      }
-      map.addSource(routeSourceId, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: coords
-          }
-        }
-      });
-      map.addLayer({
-        id: routeSourceId,
-        type: 'line',
-        source: routeSourceId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00FF00',
-          'line-width': 5
-        }
-      });
-    }
-
-    // Show ETA in minutes
-    function showETA(seconds) {
-      const etaDisplay = document.getElementById("etaDisplay");
-      const mins = Math.round(seconds / 60);
-      etaDisplay.innerText = `ETA: ${mins} min`;
-      etaDisplay.style.display = 'block';
-    }
-
-    // Fetch route from Valhalla and draw
-    function fetchRoute() {
-      if (!userLocation || !destinationCoords) return;
-
-      const body = {
-        locations: [
-          { lat: userLocation[0], lon: userLocation[1] },
-          { lat: destinationCoords[0], lon: destinationCoords[1] }
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: defaultLocation,
+        zoom: 14,
+        styles: [
+          { elementType: 'geometry', stylers: [{ color: '#1e1e1e' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#ffffff' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#000000' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2c2c2c' }] },
+          { featureType: 'water', stylers: [{ color: '#0a0a0a' }] }
         ],
-        costing: "auto",
-        directions_options: { units: "miles" }
-      };
+        disableDefaultUI: true
+      });
 
-      fetch(`https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(body))}`)
-        .then(res => res.json())
-        .then(data => {
-          if (!data.trip || !data.trip.legs.length) {
-            alert("Routing error. Try another destination.");
-            return;
-          }
-          const coords = decodePolyline(data.trip.legs[0].shape);
-          drawRoute(coords);
-          showETA(data.trip.summary.time);
-        })
-        .catch(() => alert("Routing failed"));
-    }
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({
+        map,
+        suppressMarkers: false,
+        polylineOptions: {
+          strokeColor: '#00FF00',
+          strokeWeight: 5,
+        },
+      });
 
-    // Auto reroute every 10 seconds
-    function startAutoRouting() {
-      if (routeInterval) clearInterval(routeInterval);
-      routeInterval = setInterval(fetchRoute, 10000);
-    }
-
-    const input = document.getElementById('destination');
-    const resultsDiv = document.getElementById('searchResults');
-
-    // Distance calculator for sorting
-    function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2)**2;
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    let searchTimeout = null;
-    input.addEventListener('input', () => {
-      const query = input.value.trim();
-      if (!query || !userLocation) {
-        resultsDiv.style.display = 'none';
-        resultsDiv.innerHTML = '';
-        return;
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            userLocation = new google.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+            map.setCenter(userLocation);
+            if (userMarker) userMarker.setPosition(userLocation);
+            else {
+              userMarker = new google.maps.Marker({
+                position: userLocation,
+                map,
+                title: 'You are here',
+                icon: {
+                  path: google.maps.SymbolPath.CIRCLE,
+                  scale: 8,
+                  fillColor: '#00FF00',
+                  fillOpacity: 1,
+                  strokeWeight: 2,
+                  strokeColor: '#ffffff',
+                },
+              });
+            }
+          },
+          (err) => console.warn('Geolocation error:', err),
+          { enableHighAccuracy: true }
+        );
+      } else {
+        alert('Geolocation not supported');
       }
 
-      if (searchTimeout) clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=10&lat=${userLocation[0]}&lon=${userLocation[1]}`)
-          .then(res => res.json())
-          .then(data => {
-            if (!data.features || data.features.length === 0) {
+      const input = document.getElementById('destination');
+      const resultsDiv = document.getElementById('searchResults');
+      let searchTimeout;
+
+      input.addEventListener('input', () => {
+        const query = input.value.trim();
+        if (!query) {
+          resultsDiv.style.display = 'none';
+          resultsDiv.innerHTML = '';
+          return;
+        }
+        if (!userLocation) {
+          resultsDiv.style.display = 'none';
+          resultsDiv.innerHTML = '';
+          return;
+        }
+
+        if (searchTimeout) clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+          const service = new google.maps.places.PlacesService(map);
+          const request = {
+            query: query,
+            location: userLocation,
+            radius: 10000,
+          };
+
+          service.textSearch(request, (results, status) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !results.length) {
               resultsDiv.style.display = 'none';
               resultsDiv.innerHTML = '';
               return;
             }
 
-            const sorted = data.features.sort((a,b) => {
-              const distA = getDistance(userLocation[0], userLocation[1], a.geometry.coordinates[1], a.geometry.coordinates[0]);
-              const distB = getDistance(userLocation[0], userLocation[1], b.geometry.coordinates[1], b.geometry.coordinates[0]);
+            // Sort by distance
+            results.sort((a, b) => {
+              const distA = google.maps.geometry.spherical.computeDistanceBetween(userLocation, a.geometry.location);
+              const distB = google.maps.geometry.spherical.computeDistanceBetween(userLocation, b.geometry.location);
               return distA - distB;
             });
 
             resultsDiv.innerHTML = '';
-            sorted.forEach(feature => {
-              const name = feature.properties.name || feature.properties.street || "Unknown";
-              const city = feature.properties.city || feature.properties.state || "";
-              const displayName = city ? `${name}, ${city}` : name;
-              const [lon, lat] = feature.geometry.coordinates;
+            results.forEach(place => {
+              const name = place.name;
+              const address = place.formatted_address || '';
+              const loc = place.geometry.location;
 
               const div = document.createElement('div');
               div.className = 'search-result';
 
               const span = document.createElement('span');
-              span.textContent = displayName;
+              span.textContent = `${name} - ${address}`;
 
               const btn = document.createElement('button');
               btn.textContent = 'Go';
               btn.onclick = (e) => {
                 e.stopPropagation();
                 resultsDiv.style.display = 'none';
-                input.value = displayName;
-                destinationCoords = [lat, lon];
-                fetchRoute();
-                startAutoRouting();
+                input.value = `${name} - ${address}`;
+                routeTo(loc);
               };
 
               div.appendChild(span);
@@ -308,20 +242,48 @@
               resultsDiv.appendChild(div);
             });
             resultsDiv.style.display = 'block';
-          })
-          .catch(() => {
-            resultsDiv.style.display = 'none';
-            resultsDiv.innerHTML = '';
           });
-      }, 300);
-    });
+        }, 300);
+      });
 
-    // Hide results when clicking outside
-    document.addEventListener('click', (e) => {
-      if (!document.getElementById("destination-input").contains(e.target)) {
-        resultsDiv.style.display = 'none';
+      // Hide search results if clicked outside
+      document.addEventListener('click', (e) => {
+        if (!document.getElementById('destination-input').contains(e.target)) {
+          resultsDiv.style.display = 'none';
+        }
+      });
+    }
+
+    function routeTo(destination) {
+      if (!userMarker) {
+        alert('Waiting for your location...');
+        return;
       }
-    });
+      directionsService.route(
+        {
+          origin: userMarker.getPosition(),
+          destination: destination,
+          travelMode: google.maps.TravelMode.DRIVING,
+        },
+        (response, status) => {
+          if (status === 'OK') {
+            directionsRenderer.setDirections(response);
+            const leg = response.routes[0].legs[0];
+            const etaDiv = document.getElementById('etaDisplay');
+            etaDiv.innerText = `ETA: ${leg.duration.text}`;
+            etaDiv.style.display = 'block';
+          } else {
+            alert('Directions request failed due to ' + status);
+          }
+        }
+      );
+    }
   </script>
+
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places,geometry&callback=initMap"
+    async
+    defer
+  ></script>
 </body>
 </html>
