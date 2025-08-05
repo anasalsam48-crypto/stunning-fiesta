@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Tesla Dashboard v6</title>
+  <title>Tesla Dashboard v4</title>
   <style>
     html, body {
-      margin: 0; padding: 0; height: 100%; width: 100%;
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
       background-color: #000;
       font-family: sans-serif;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
-      -webkit-overflow-scrolling: touch;
       color: white;
-      overflow: hidden;
     }
+
     body {
       padding-top: env(safe-area-inset-top);
       padding-left: env(safe-area-inset-left);
@@ -29,30 +29,28 @@
       width: 100vw;
       background-color: #000;
     }
+
     #destination-input {
       position: absolute;
-      top: calc(env(safe-area-inset-top) + 10px);
-      left: 10px;
-      right: 10px;
-      max-width: 350px;
-      margin: 0 auto;
-      background: #222;
-      padding: 10px;
-      border-radius: 6px;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 10;
-      box-shadow: 0 0 15px #000;
-      box-sizing: border-box;
+      width: 300px;
     }
+
     #destination-input input {
       width: 100%;
       padding: 8px;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
       font-size: 14px;
       background: #111;
       color: white;
       outline: none;
+      box-shadow: 0 0 10px #000;
     }
+
     #searchResults {
       max-height: 300px;
       overflow-y: auto;
@@ -63,44 +61,56 @@
       margin-top: 4px;
       box-shadow: 0 0 10px #000;
     }
+
     .search-result {
       padding: 8px;
       border-bottom: 1px solid #333;
       cursor: pointer;
-      user-select: none;
     }
+
     .search-result:hover {
       background: #333;
     }
-    #etaDisplay {
+
+    #etaDisplay, #stopBtn {
       position: fixed;
-      bottom: 60px;
       right: 20px;
-      background: #222;
-      color: white;
+      z-index: 1001;
       padding: 8px 12px;
       border-radius: 6px;
-      z-index: 1001;
-      display: none;
+      box-shadow: 0 0 10px #000;
       font-family: monospace;
-      user-select: none;
-      box-shadow: 0 0 10px #000;
     }
-    #stopBtn {
-      position: fixed;
-      bottom: 110px;
-      right: 20px;
-      background: #900;
-      color: white;
-      padding: 8px 12px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      z-index: 1001;
+
+    #etaDisplay {
+      bottom: 60px;
+      background: #222;
       display: none;
-      user-select: none;
+    }
+
+    #stopBtn {
+      bottom: 110px;
+      background: #900;
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: none;
+    }
+
+    #recenterBtn {
+      position: absolute;
+      bottom: 160px;
+      left: 20px;
+      z-index: 1001;
+      background: #000;
+      color: #0f0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
       box-shadow: 0 0 10px #000;
     }
+
     #bottom-buttons {
       position: fixed;
       bottom: 0;
@@ -110,9 +120,9 @@
       justify-content: space-around;
       padding: 12px 0;
       z-index: 1001;
-      user-select: none;
       box-shadow: 0 -2px 5px #000;
     }
+
     #bottom-buttons button {
       color: white;
       background: transparent;
@@ -120,19 +130,13 @@
       font-size: 16px;
       cursor: pointer;
     }
-    #recenterBtn {
-      position: absolute;
-      bottom: 160px;
-      left: 20px;
-      z-index: 20;
-      background: #000;
-      color: #0f0;
-      padding: 8px 12px;
-      border-radius: 6px;
-      border: none;
-      cursor: pointer;
-      user-select: none;
-      box-shadow: 0 0 10px #000;
+
+    .arrow-icon {
+      path: "M 0,-20 L 10,10 L -10,10 Z";
+      fill: red;
+      stroke: white;
+      stroke-width: 2;
+      filter: drop-shadow(0 0 2px black);
     }
   </style>
 </head>
@@ -158,50 +162,17 @@
   <script>
     let map;
     let userMarker;
+    let userLocation = null;
+    let autoRecenter = false;
     let directionsService;
     let directionsRenderer;
-    let userLocation = null;
-    let autoRecenter = true;
-    let routingActive = false;
-    let currentHeading = 0;
+    let isRouting = false;
 
     function initMap() {
       map = new google.maps.Map(document.getElementById("map"), {
         zoom: 15,
         disableDefaultUI: true,
-        tilt: 45,
-        heading: 0,
-        styles: [
-          { elementType: "geometry", stylers: [{ color: "#212121" }] },
-          { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-          { elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
-          { elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] },
-          {
-            featureType: "administrative",
-            elementType: "geometry",
-            stylers: [{ color: "#757575" }],
-          },
-          {
-            featureType: "poi",
-            elementType: "geometry",
-            stylers: [{ color: "#1f1f1f" }],
-          },
-          {
-            featureType: "road",
-            elementType: "geometry",
-            stylers: [{ color: "#383838" }],
-          },
-          {
-            featureType: "transit",
-            elementType: "geometry",
-            stylers: [{ color: "#2f2f2f" }],
-          },
-          {
-            featureType: "water",
-            elementType: "geometry",
-            stylers: [{ color: "#000000" }],
-          },
-        ],
+        styles: [ /* dark mode styles omitted for brevity */ ]
       });
 
       directionsService = new google.maps.DirectionsService();
@@ -219,51 +190,35 @@
               userMarker = new google.maps.Marker({
                 position: userLocation,
                 map,
-                icon: getTeslaArrowIcon(0),
-                anchorPoint: new google.maps.Point(12, 12),
+                icon: {
+                  path: "M 0,-20 L 12,10 L -12,10 Z",
+                  fillColor: "red",
+                  fillOpacity: 1,
+                  strokeColor: "white",
+                  strokeWeight: 2,
+                  scale: 1.2,
+                  rotation: 0,
+                  anchor: new google.maps.Point(0, 0)
+                }
               });
               map.setCenter(userLocation);
+              autoRecenter = true;
             } else {
               userMarker.setPosition(userLocation);
-            }
-
-            if (routingActive) {
-              // Rotate map and marker
-              map.setHeading(currentHeading);
-              map.setCenter(userLocation);
-              userMarker.setIcon(getTeslaArrowIcon(currentHeading));
-            } else if (autoRecenter) {
-              map.setHeading(0);
-              map.setCenter(userLocation);
-              userMarker.setIcon(getTeslaArrowIcon(0));
+              if (autoRecenter) map.setCenter(userLocation);
             }
           },
           (err) => {
-            console.error("Geolocation error:", err);
+            console.warn("Geolocation failed:", err);
+            alert("Location failed: Please enable location services.");
           },
-          { enableHighAccuracy: true, maximumAge: 3000, timeout: 7000 }
+          { enableHighAccuracy: true, maximumAge: 1000 }
         );
-      }
-
-      // Device orientation (for heading)
-      if (window.DeviceOrientationEvent) {
-        window.addEventListener("deviceorientationabsolute", (event) => {
-          if (event.absolute && event.alpha !== null) {
-            currentHeading = 360 - event.alpha; // Convert to compass heading
-            if (routingActive) {
-              map.setHeading(currentHeading);
-              map.setCenter(userLocation);
-              if (userMarker) userMarker.setIcon(getTeslaArrowIcon(currentHeading));
-            }
-          }
-        });
       }
 
       const input = document.getElementById("destination");
       const searchBox = new google.maps.places.SearchBox(input);
       const resultsDiv = document.getElementById("searchResults");
-      const stopBtn = document.getElementById("stopBtn");
-      const etaDisplay = document.getElementById("etaDisplay");
 
       input.addEventListener("input", () => {
         resultsDiv.innerHTML = "";
@@ -274,22 +229,21 @@
         const places = searchBox.getPlaces();
         resultsDiv.innerHTML = "";
 
-        if (places.length === 0) return;
+        if (!places.length) return;
 
         places.forEach((place) => {
           if (!place.geometry) return;
 
-          const resultItem = document.createElement("div");
-          resultItem.className = "search-result";
-          resultItem.textContent = place.name;
-          resultItem.addEventListener("click", () => {
+          const div = document.createElement("div");
+          div.className = "search-result";
+          div.textContent = place.name;
+          div.onclick = () => {
             input.value = place.name;
             resultsDiv.innerHTML = "";
             resultsDiv.style.display = "none";
             routeTo(place.geometry.location);
-          });
-
-          resultsDiv.appendChild(resultItem);
+          };
+          resultsDiv.appendChild(div);
         });
 
         resultsDiv.style.display = "block";
@@ -301,46 +255,20 @@
         }
       });
 
-      document.getElementById("recenterBtn").addEventListener("click", () => {
+      document.getElementById("recenterBtn").onclick = () => {
         if (userLocation) {
+          map.setCenter(userLocation);
           autoRecenter = true;
-          routingActive = false;
-          map.setHeading(0);
-          map.setCenter(userLocation);
-          userMarker.setIcon(getTeslaArrowIcon(0));
         }
-      });
+      };
 
-      stopBtn.addEventListener("click", () => {
+      document.getElementById("stopBtn").onclick = () => {
         directionsRenderer.set("directions", null);
-        etaDisplay.style.display = "none";
-        stopBtn.style.display = "none";
-        autoRecenter = true;
-        routingActive = false;
+        document.getElementById("etaDisplay").style.display = "none";
+        document.getElementById("stopBtn").style.display = "none";
+        isRouting = false;
         map.setHeading(0);
-        if (userLocation) {
-          map.setCenter(userLocation);
-          userMarker.setIcon(getTeslaArrowIcon(0));
-        }
-      });
-    }
-
-    function getTeslaArrowIcon(rotationDegrees) {
-      // Rounded, wider Tesla style arrow with white stroke and shadow
-      const svg = `
-        <svg width="40" height="40" viewBox="0 0 24 24" 
-          xmlns="http://www.w3.org/2000/svg" 
-          style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">
-          <path d="M12 2 L18 14 L12 11 L6 14 Z" 
-            fill="red" stroke="white" stroke-width="1.5" stroke-linejoin="round" />
-        </svg>
-      `;
-
-      return {
-        url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-        anchor: new google.maps.Point(12, 12),
-        scaledSize: new google.maps.Size(24, 24),
-        rotation: rotationDegrees,
+        map.setTilt(0);
       };
     }
 
@@ -351,7 +279,6 @@
       }
 
       autoRecenter = false;
-      routingActive = true;
 
       directionsService.route(
         {
@@ -366,8 +293,12 @@
             document.getElementById("etaDisplay").innerText = "ETA: " + duration;
             document.getElementById("etaDisplay").style.display = "block";
             document.getElementById("stopBtn").style.display = "block";
+            isRouting = true;
+
+            map.setHeading(0);
+            map.setTilt(45);
           } else {
-            alert("Directions request failed: " + status);
+            alert("Directions failed: " + status);
           }
         }
       );
@@ -375,8 +306,6 @@
 
     window.initMap = initMap;
   </script>
-  <script async defer
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places&callback=initMap">
-  </script>
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDNIMK5n09eQactHuhsqzZomcj-0Gyv_NA&libraries=places&callback=initMap"></script>
 </body>
 </html>
